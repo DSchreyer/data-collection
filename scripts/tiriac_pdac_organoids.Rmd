@@ -1,0 +1,289 @@
+---
+title: "Tiriac PDAC Organoids"
+author: "Daniel Schreyer"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    fig_caption: true
+date: "`r format(Sys.time(), '%d. %B %Y')`"
+---
+### Aim
+
+### Approach
+
+### Key results
+
+### Information about the results and the analysis
+
+```{r Packages}
+library(GenomicDataCommons)
+library(dplyr)
+```
+
+
+```{r Data}
+ge_ids <- files() %>%
+    GenomicDataCommons::filter( cases.project.project_id == 'ORGANOID-PANCREATIC') %>% 
+    GenomicDataCommons::filter( type == 'gene_expression' ) %>% 
+    GenomicDataCommons::filter( analysis.workflow_type == 'STAR - Counts') %>%
+    response_all()
+
+ge_ids.rnaseq <- ge_ids$results %>% 
+  dplyr::filter(data_type == "Gene Expression Quantification")
+dim(ge_ids.rnaseq)
+# generate ids from filename
+rownames(ge_ids.rnaseq) <- (gsub("\\.rna_seq\\.star_gene_counts\\.tsv\\.gz", 
+                                 "", ge_ids.rnaseq$file_name))
+
+clin <- read.csv("data/pdcl_organoids/pdac_organoids_manifest.csv")
+clin.rnaseq <- clin %>% dplyr::filter(RNAseq == "YES")
+dim(clin.rnaseq)
+
+# read in count files
+counts <- read.csv(file = "data/pdcl_organoids/pdac_organoid_count_file.tsv",
+                   header = F, row.names = 1, stringsAsFactors = F)
+count.ids <- as.character(counts[1, ])
+counts.final <- counts[2:nrow(counts), ]
+genes <- rownames(counts.final)
+counts.final <- apply(counts.final, 2, as.numeric)
+colnames(counts.final) <- count.ids
+rownames(counts.final) <- genes
+dim(counts.final)
+
+# check if ge ids are also in counts.final
+all(rownames(ge_ids.rnaseq) %in% colnames(counts.final))
+
+# sort according to count colnames
+counts.final <- counts.final[, rownames(ge_ids.rnaseq)]
+all(rownames(ge_ids.rnaseq) == colnames(counts.final))
+
+
+
+manifest <- files() %>%
+  GenomicDataCommons::filter( cases.project.project_id == 'ORGANOID-PANCREATIC') %>% 
+  GenomicDataCommons::filter( type == 'gene_expression' ) %>% 
+  GenomicDataCommons::filter( analysis.workflow_type == 'STAR - Counts') %>%
+  expand("cases") %>% manifest()
+
+
+as.character(map$case_submitter_id) %in% colnames(counts.final)
+
+expands = c("project", "samples", "files", "annotations")
+clinResults = cases() %>% 
+  filter( ~ project.project_id == 'ORGANOID-PANCREATIC') %>% response_all()
+df <- clinResults$id
+
+clinResults = projects() %>% 
+  filter( ~ project_id == 'ORGANOID-PANCREATIC') %>% results_all()
+
+file.idx <- read.csv("data/pdcl_organoids/cases_fileid_index.csv")
+file.manifest <- read.csv("data/pdcl_organoids/file_manifest_index.csv")
+clin <- read.csv("data/pdcl_organoids/pdac_organoids_manifest.csv")
+
+map <- read.csv("data/pdcl_organoids/sample_map.csv")
+man2 <- man %>% dplyr::select(Organoid, file_id, sample_id, id, cases)
+```
+
+```{r }
+clinResults = files() %>% 
+  GenomicDataCommons::filter( ~ project_id == 'ORGANOID-PANCREATIC') %>% response_all()
+projects
+    
+res = files() %>%
+  GenomicDataCommons::filter( cases.project.project_id == 'ORGANOID-PANCREATIC') %>% 
+  GenomicDataCommons::filter( type == 'gene_expression' ) %>%
+  GenomicDataCommons::filter( data_type == 'Gene Expression Quantification' ) %>%
+  GenomicDataCommons::filter( analysis.workflow_type == 'STAR - Counts')
+
+res2 <- res %>% expand(c("cases", "annotations", "metadata_files", 
+                         "archive", "downstream_analyses.output_files",
+                         "associated_entities", "index_files")) %>%
+  results_all()
+
+cases <- bind_rows(res2$cases)
+cases <- as.data.frame(apply(cases, 2, as.character))
+rownames(cases) <- names(res2$cases)
+
+
+rownames(cases) %in% colnames(counts.final)
+
+map2 <- map %>% select(case_id, case_submitter_id, composition) %>% 
+  filter(composition == "3D Organoid") %>% unique()
+
+merge1 <- left_join(cases, map2, by = "case_id")
+merge1$submitter_id <- as.integer(as.character(merge1$submitter_id))
+
+merge2 <- left_join(clin, merge1, by = c("Patient.number" = "submitter_id"))
+merge3 <- merge2 %>% filter(!is.na(case_id)) %>% unique()
+
+file.idx <- read.csv("data/pdcl_organoids/cases_fileid_index.csv")
+merge4 <- left_join(merge3, file.idx, by = c("case_id" = "cases"))
+
+merge4 <- merge4 %>% select(Patient.number, Organoid, Type.of.Sample, Sex, Age, 
+                            Race, Stage, Tumor, KRAS.Allele.Frequencies, WES,
+                            WES.passage, RNAseq, RNAseq.passage,
+                            Treatment.prior.to.organoid, case_id, case_submitter_id,
+                            file_id)
+
+m <- inner_join(manifest, file.idx)
+m.sub <- m[grepl(pattern = "*.star_gene_counts*", x = m$filename), ]
+
+
+ge_ids.rnaseq$file <- rownames(ge_ids.rnaseq)
+
+merge5 <- inner_join(merge4, ge_ids.rnaseq)
+
+all(merge5$file %in% colnames(counts.final))
+dim(merge5)
+```
+
+```{r analysis}
+# genes without counts in at least 10 organoids
+keep <- rowSums(counts.final > 0) >= ncol(counts.final)*0.1
+counts.final2 <- counts.final[keep, ]
+
+library(EnsDb.Hsapiens.v79)
+
+# 1. Convert from ensembl.gene to gene.symbol
+ensembl.genes <- c("ENSG00000150676", "ENSG00000099308", "ENSG00000142676", "ENSG00000180776", "ENSG00000108848", "ENSG00000277370", "ENSG00000103811", "ENSG00000101473")
+
+geneIDs1 <- ensembldb::select(EnsDb.Hsapiens.v79, keys= ensembl.genes, keytype = "GENEID", columns = c("SYMBOL","GENEID"))
+
+# 2. Convert from gene.symbol to ensembl.gene
+geneSymbols <-  c('DDX26B','CCDC83',  'MAST3', 'RPL11', 'ZDHHC20',  'LUC7L3',  'SNORD49A',  'CTSH', 'ACOT8')
+
+geneIDs2 <- ensembldb::select(EnsDb.Hsapiens.v79, keys= geneSymbols, keytype = "SYMBOL", columns = c("SYMBOL","GENEID"))
+
+library(biomaRt)
+mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", 
+                dataset = "hsapiens_gene_ensembl", host = "http://dec2017.archive.ensembl.org" )
+                
+gene.ids <- gsub(pattern = "\\.[0-9]*", replacement = "", x = rownames(counts.final2))
+counts.final3 <- counts.final2
+rownames(counts.final3) <- gene.ids
+
+gene.symbols <- getBM(attributes=c('hgnc_symbol', 'ensembl_gene_id'), 
+      filters = 'ensembl_gene_id',
+      values =rownames(counts.final3), 
+      mart = mart)
+
+# removed  miRNA and pseudogenes
+
+# remove duplicate gene ids
+gene.symbols.uniq <- filter(gene.symbols, !(ensembl_gene_id %in% c('ENSG00000206785', 'ENSG00000207062', 'ENSG00000207704', 'ENSG00000230417', 'ENSG00000263436')))
+
+rownames(gene.symbols.uniq) <- gene.symbols.uniq$ensembl_gene_id
+gene.symbols.uniq <- filter(gene.symbols.uniq, hgnc_symbol != "")
+
+counts.final4 <- counts.final3[gene.symbols.uniq$ensembl_gene_id, ]
+rownames(counts.final4) <- gene.symbols.uniq$hgnc_symbol
+
+write.csv(counts.final4, "results/tiriac_pdac_organoids_gene_organoid_counts.csv",row.names = T, col.names = T)
+```
+
+
+
+```{r}
+# organoid naming
+merge5$file %in% colnames(counts.final4)
+organoid <- dplyr::select(merge5, file, Organoid)
+organoid$Organoid <- as.character(organoid$Organoid)
+files <- unique(organoid$file)
+
+organoid.new <- ifelse(organoid$Organoid %in% c("hT64", "hF34"),
+                       "hT64_hF34", organoid$Organoid)
+organoid.new <- ifelse(organoid.new %in% c("hM19A", "hM19B", "hM19C", "hM19D"), "hM19", organoid.new)
+organoid.new <- ifelse(organoid.new %in% c("hM1A", "hM1E", "hM1F"), "hM1", organoid.new)
+
+organoid.df <- data.frame(organoid = organoid.new, file = organoid$file) %>%
+  unique()
+rownames(organoid.df) <- organoid.df$file
+
+# sort organoid.df
+organoid.df <- organoid.df[colnames(counts.final4), ]
+rownames(organoid.df) == colnames(counts.final4)
+
+# make unique rownames with organoid names
+rownames(organoid.df) <- make.names(organoid.df$organoid, unique = T)
+
+all(organoid.df$file == colnames(counts.final4))
+
+# extend organoid data frame
+sample.id <- substr(as.character(organoid.df$organoid), start = 1, stop = 2)
+organoid.df$sample.id <- sample.id
+
+#change colnames of counts
+colnames(counts.final4) <- rownames(organoid.df)
+write.csv(counts.final4, "results/tiriac_pdac_organoids_names_counts.csv")
+```
+
+
+```{r Deseq}
+library(DESeq2)
+library(xlsx)
+library(ComplexHeatmap)
+norm <- rlog(counts.final4)
+rownames(norm) <- rownames(counts.final4)
+
+# write rlog normalized data
+write.csv(norm, "results/tiriac_pdac_organoids_rlog_counts.csv")
+
+moffitt.classes <- read.xlsx("data/gene-sets_subtype_drug-sensitivity.xlsx",
+                             sheetIndex = 1)
+
+moffitt.classes$symbol <- as.character(moffitt.classes$symbol)
+
+moffitt.counts <- norm[moffitt.classes$symbol, ]
+
+m <- t(scale(t(moffitt.counts)))
+  
+# full Heatmap
+Heatmap(m)
+
+# exclude normal samples
+tumor.samples <- organoid.df$sample.id != "hN"
+sub <- moffitt.counts[, tumor.samples]
+sub.norm <- t(scale(t(sub)))
+
+pdf("results/pdac_organoids_moffitt-signatures_heatmap.pdf")
+Heatmap(sub.norm, clustering_distance_rows = "pearson", clustering_distance_columns = "pearson",
+        row_names_gp = gpar(fontsize = 4), column_names_gp = gpar(fontsize = 8))
+dev.off()
+
+tiriac.classes <- read.xlsx("data/gene-sets_subtype_drug-sensitivity.xlsx",
+                             sheetIndex = 2)
+tiriac.classes$symbol <- as.character(tiriac.classes$symbol)
+
+# remove genes not in count matrix
+tiriac.symbols <- tiriac.classes$symbol[(tiriac.classes$symbol %in% rownames(norm))]
+
+tiriac.counts <- norm[tiriac.symbols, ]
+sub <- tiriac.counts[, tumor.samples]
+sub.norm <- t(scale(t(sub)))
+
+pdf("results/pdac_organoids_C1-C2-signatures_heatmap.pdf")
+Heatmap(sub.norm, row_names_gp = gpar(fontsize = 2),
+        column_names_gp = gpar(fontsize = 8),
+        clustering_distance_rows = "pearson", clustering_distance_columns = "pearson")
+dev.off()
+```
+
+```{r Final Data}
+counts <- counts.final4
+write.csv(organoid.df, row.names = T, file = "results/pdac_organoids_updated_manifest.csv")
+
+# updated sample ids manually in Excel
+organoids <- read.csv("data/pdcl_organoids/pdac_organoids_updated_manifest.csv", stringsAsFactors = F)
+all(colnames(counts) == organoids$organoid.old)
+colnames(counts) <- organoids$organoid.new
+
+c <- left_join(organoids, clin, by = c("organoid.new" = "Organoid"))
+
+write.csv(c, file = "results/pdac_organoids_final_updated_manifest.csv")
+
+write.csv(counts, file = "data/pdac_organoids_count-matrix_w_sample-ids.csv", row.names = T)
+```
+
+
+
